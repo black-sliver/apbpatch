@@ -1,0 +1,9 @@
+[submodule "subprojects/bzip2"]
+	path = subprojects/bzip2
+	url = git://sourceware.org/git/bzip2.git
+[submodule "subprojects/xz"]
+	path = subprojects/xz
+	url = https://git.tukaani.org/xz.git
+[submodule "subprojects/libyaml"]
+	path = subprojects/libyaml
+	url = https://github.com/yaml/libyaml.git

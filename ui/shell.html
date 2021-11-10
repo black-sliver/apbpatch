@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en-us">
+  <head>
+    <meta charset="utf-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+    <title>apbpatch</title>
+    <style>
+      body { height:100%; padding: 0 10px 0 10px; margin: 0; background: #333; color: #eee; }
+      a,a:visited { color: #6af; }
+      a:hover { color: #8cf; }
+      a:active { color: #fff; }
+      .emscripten { padding-right: 0; margin-left: auto; margin-right: auto; display: block; }
+      textarea.emscripten { font-family: monospace; width: 80%; }
+      div.emscripten { text-align: center; }
+      div.emscripten_border { border: 1px solid black; }
+      /* the canvas *must not* have any border or padding, or mouse coords will be wrong */
+      canvas.emscripten { border: 0px none; background-color: black; }
+
+      .spinner {
+        height: 50px;
+        width: 50px;
+        margin: 0px auto;
+        -webkit-animation: rotation .8s linear infinite;
+        -moz-animation: rotation .8s linear infinite;
+        -o-animation: rotation .8s linear infinite;
+        animation: rotation 0.8s linear infinite;
+        border-left: 10px solid rgb(0,150,240);
+        border-right: 10px solid rgb(0,150,240);
+        border-bottom: 10px solid rgb(0,150,240);
+        border-top: 10px solid rgb(100,0,200);
+        border-radius: 100%;
+        background-color: rgb(200,100,250);
+      }
+      @-webkit-keyframes rotation {
+        from {-webkit-transform: rotate(0deg);}
+        to {-webkit-transform: rotate(360deg);}
+      }
+      @-moz-keyframes rotation {
+        from {-moz-transform: rotate(0deg);}
+        to {-moz-transform: rotate(360deg);}
+      }
+      @-o-keyframes rotation {
+        from {-o-transform: rotate(0deg);}
+        to {-o-transform: rotate(360deg);}
+      }
+      @keyframes rotation {
+        from {transform: rotate(0deg);}
+        to {transform: rotate(360deg);}
+      }
+
+      .drop{display:block;padding:32px;margin:8px 0 8px 0; border-radius:4px;color:#000;background:#f7f7f7;border:1px solid #000;vertical-align:middle;}
+      .drop.over{color:#fff;background:#070707;border:1px solid #fff;}
+      #rom,#patch{display:none;}
+
+      noscript,.info {
+        display: block;
+        padding:10px 5px 5px 5px;
+      }
+      noscript {
+        color: #f33;
+      }
+      footer {
+        position: absolute;
+        display: block;
+        text-align: center;
+        left: 10px;
+        right: 10px;
+        bottom: 0;
+        padding: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <figure style="overflow:visible;" id="spinner"><div class="spinner"></div><center style="margin-top:0.5em"><strong>emscripten</strong></center></figure>
+    <div class="emscripten" id="status">Downloading...</div>
+    <div class="emscripten">
+      <progress value="0" max="100" id="progress" hidden=1></progress>  
+    </div>
+    
+    <noscript>apbpatch requires javascript to work</noscript>
+    <div class="info">apbpatch runs in your browser. Your files will not leave your machine.</div>
+    
+    <label class="drop" id="patchdrop" for="patch" style="display:none;">Drop you patch here</label>
+    <input type="file" id="patch" accept=".ap*"/>
+    <label class="drop" id="romdrop" for="rom" style="display:none;">Drop your vanilla rom here</label>
+    <input type="file" id="rom" accept=".sfc,.smc"/>
+    
+    <textarea class="emscripten" id="output" rows="8"></textarea>
+    
+    <footer><a href="https://github.com/black-sliver/apbpatch">Readme &amp; Credits</a></footer>
+    <script type='text/javascript'>
+var info = null;
+var patch = null;
+var statusElement = document.getElementById('status');
+var progressElement = document.getElementById('progress');
+var spinnerElement = document.getElementById('spinner');
+
+var Module = {
+  preRun: [],
+  postRun: [],
+  print: (function() {
+    var element = document.getElementById('output');
+    if (element) element.value = ''; // clear browser cache
+    return function(text) {
+      if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
+      // These replacements are necessary if you render to raw HTML
+      //text = text.replace(/&/g, "&amp;");
+      //text = text.replace(/</g, "&lt;");
+      //text = text.replace(/>/g, "&gt;");
+      //text = text.replace('\n', '<br>', 'g');
+      console.log(text);
+      if (element) {
+        element.value += text + "\n";
+        element.scrollTop = element.scrollHeight; // focus on bottom
+      }
+    };
+  })(),
+  printErr: function(text) {
+    Module.print(text);
+    if (arguments.length > 1) text = Array.prototype.slice.call(arguments).join(' ');
+    console.error(text);
+  },
+  setStatus: function(text) {
+    if (!Module.setStatus.last) Module.setStatus.last = { time: Date.now(), text: '' };
+    if (text === Module.setStatus.last.text) return;
+    var m = text.match(/([^(]+)\((\d+(\.\d+)?)\/(\d+)\)/);
+    var now = Date.now();
+    if (m && now - Module.setStatus.last.time < 30) return; // if this is a progress update, skip it if too soon
+    Module.setStatus.last.time = now;
+    Module.setStatus.last.text = text;
+    if (m) {
+      text = m[1];
+      progressElement.value = parseInt(m[2])*100;
+      progressElement.max = parseInt(m[4])*100;
+      progressElement.hidden = false;
+      spinnerElement.hidden = false;
+    } else {
+      progressElement.value = null;
+      progressElement.max = null;
+      progressElement.hidden = true;
+      if (!text) spinnerElement.hidden = true;
+    }
+    statusElement.innerHTML = text;
+  },
+  totalDependencies: 0,
+  monitorRunDependencies: function(left) {
+    this.totalDependencies = Math.max(this.totalDependencies, left);
+    Module.setStatus(left ? 'Preparing... (' + (this.totalDependencies-left) + '/' + this.totalDependencies + ')' : 'All downloads complete.');
+  },
+  onRuntimeInitialized: function() {
+      info = Module.cwrap('info', 'number', ['string']);
+      patch = Module.cwrap('patch', 'number', ['string','string','string']);
+  }
+};
+Module.setStatus('Downloading...');
+window.onerror = function() {
+  Module.setStatus('Exception thrown, see JavaScript console');
+  spinnerElement.style.display = 'none';
+  Module.setStatus = function(text) {
+    if (text) Module.printErr('[post-exception status] ' + text);
+  };
+};
+
+var stdout = document.getElementById('output');
+var patchdrop = document.getElementById('patchdrop');
+var patchinput = document.getElementById('patch');
+var romdrop = document.getElementById('romdrop');
+var rominput = document.getElementById('rom');
+var patchname;
+var romname;
+var outname;
+
+stdout.style.display = 'none';
+patchdrop.style.display = 'block';
+romdrop.style.display = 'none';
+
+function readBlob(fn,mime) {
+    return new Blob([FS.readFile(fn,{'encoding':'binary'})],{type:mime});
+}
+function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    return a;
+}
+function downloadFS(fn,mime) {
+    console.log(fn, mime);
+    downloadBlob(readBlob(fn,mime), fn.split('/').pop());
+}
+
+var loadPatch = function(f) {
+  if (patchname) FS.unlink(patchname);
+  patchname = undefined;
+  stdout.value = '';
+  stdout.style.display = 'none';
+  romdrop.style.display = 'none';
+  f.arrayBuffer().then(function(buf) {
+    patchname = f.name;
+    FS.writeFile(patchname, new Uint8Array(buf));
+    if (info(patchname)) {
+      patchdrop.innerText = 'APBP ' + stdout.value.split('\n').slice(-2,1).pop();
+      romdrop.style.display = 'block';
+    } else {
+      patchdrop.innerText = 'Drop you patch here';
+      FS.unlink(patchname);
+      patchname = undefined;
+      stdout.style.display = 'block';
+    }
+  });
+};
+
+var loadRom = function(f) {
+  if (romname) FS.unlink(romname);
+  romname = undefined;
+  stdout.value = '';
+  stdout.style.display = 'none';
+  f.arrayBuffer().then(function(buf) {
+    romname = f.name;
+    ext = romname.split('.').pop();
+    outname = patchname.replace(/\.[^/.]+$/, '.'+ext);
+    if (outname == patchname) outname += '.patched';
+    FS.writeFile(romname, new Uint8Array(buf));
+    if (patch(romname, outname, patchname)) {
+      var mimes = {
+        'smc': 'application/vnd.nintendo.snes.rom',
+        'sfc': 'application/vnd.nintendo.snes.rom'
+      };
+      downloadFS(outname, mimes[ext.toLowerCase()] || 'application/octet-stream');
+      FS.unlink(outname);
+      outname = undefined;
+    } else {
+      stdout.style.display = 'block';
+      FS.unlink(romname);
+      romname = undefined;
+    }
+  });
+};
+
+var filedragenter = function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.classList.add('over');
+};
+var filedragleave = function(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    this.classList.remove('over');
+};
+var filedragover = function(e) {
+    e.preventDefault();
+    this.classList.add('over');
+};
+
+patchdrop.addEventListener('dragenter', filedragenter);
+patchdrop.addEventListener('dragleave', filedragleave);
+patchdrop.addEventListener('dragover', filedragover);
+romdrop.addEventListener('dragenter', filedragenter);
+romdrop.addEventListener('dragleave', filedragleave);
+romdrop.addEventListener('dragover', filedragover);
+
+patchdrop.addEventListener('drop', function(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    this.classList.remove('over');
+    var f = null;
+    if (e.dataTransfer.items) {
+        for (var i=0; i<e.dataTransfer.items.length; i++) {
+            if (e.dataTransfer.items[i].kind === 'file') {
+                f = e.dataTransfer.items[i].getAsFile();
+            }
+        }
+    } else if (e.dataTransfer.files && d.dataTransfer.files.length>0) {
+        f = e.dataTransfer.files[0];
+    }
+    loadPatch(f);
+});
+patchinput.addEventListener('change', function(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    drop.classList.remove('over');
+    if (patchinput.files.length > 0) loadPatch(patchinput.files[0]);
+});
+
+romdrop.addEventListener('drop', function(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    this.classList.remove('over');
+    var f = null;
+    if (e.dataTransfer.items) {
+        for (var i=0; i<e.dataTransfer.items.length; i++) {
+            if (e.dataTransfer.items[i].kind === 'file') {
+                f = e.dataTransfer.items[i].getAsFile();
+            }
+        }
+    } else if (e.dataTransfer.files && d.dataTransfer.files.length>0) {
+        f = e.dataTransfer.files[0];
+    }
+    loadRom(f);
+});
+rominput.addEventListener('change', function(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    drop.classList.remove('over');
+    if (rominput.files.length > 0) loadRom(rominput.files[0]);
+});
+    </script>
+    {{{ SCRIPT }}}
+  </body>
+</html>

@@ -279,7 +279,7 @@ patchdrop.addEventListener('drop', function(e) {
 patchinput.addEventListener('change', function(e) {
     e.stopPropagation();
     e.preventDefault();
-    drop.classList.remove('over');
+    patchdrop.classList.remove('over');
     if (patchinput.files.length > 0) loadPatch(patchinput.files[0]);
 });
 
@@ -302,7 +302,7 @@ romdrop.addEventListener('drop', function(e) {
 rominput.addEventListener('change', function(e) {
     e.stopPropagation();
     e.preventDefault();
-    drop.classList.remove('over');
+    romdrop.classList.remove('over');
     if (rominput.files.length > 0) loadRom(rominput.files[0]);
 });
     </script>

@@ -6,7 +6,7 @@
 # varying build systems to create a single wasm blob is worse than this.
 #
 
-VERSION="0.2.0"
+VERSION=`sed -n -e 's/#define VERSION "\([^\"]*\)"$/\1/p' src/main.c`
 
 FVERSION="${VERSION//./-}"
 NATIVE_PLATFORM="`uname -s`-`uname -m`"

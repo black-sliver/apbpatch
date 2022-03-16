@@ -338,6 +338,7 @@ static bool read_patch_v4(FILE *fpatch, uint8_t **ppatch_data, size_t *ppatch_da
         fprintf(stderr, "Could not parse archipelago.json (%d)!\n", r);
         goto data_error;
     }
+
     for (i = 1; i < r; i++) {
         /* iterate over root object */
         if (json_is(json, &t[i], "game") && pgame) {
@@ -346,31 +347,21 @@ static bool read_patch_v4(FILE *fpatch, uint8_t **ppatch_data, size_t *ppatch_da
                 fprintf(stderr, "\"game\" not a string!\n");
                 goto data_error;
             }
-            i++;
         } else if (json_is(json, &t[i], "base_checksum") && pchecksum) {
             *pchecksum = json_strdup(json, &t[i+1]);
             if (!*pchecksum) {
                 fprintf(stderr, "\"base_checksum\" not a string!\n");
                 goto data_error;
             }
-            i++;
         } else if (json_is(json, &t[i], "compatible_version")) {
             long compatible_version = json_long(json, &t[i+1], NULL);
             if (compatible_version != 4) {
                 fprintf(stderr, "Incompatible apbp version %ld\n", compatible_version);
                 goto data_error;
             }
-            i++;
-        } else if (t[i].type == JSMN_ARRAY) {
-            /* ignore unknown array */
-            while (i < t_count-1 && t[i+1].parent != -1) i++;
-        } else if (t[i].type == JSMN_OBJECT) {
-            /* ignore unknown object */
-            while (i < t_count-1 && t[i+1].parent != -1) i++;
-        } else {
-            /* ignore unknown literal */
-            i++;
         }
+        /* skip to the next key in root */
+        while (i < t_count-1 && t[i+1].parent != 0) i++;
     }
 
     if (ppatch_data && ppatch_data_len) {

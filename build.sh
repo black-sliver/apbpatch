@@ -31,6 +31,15 @@ BZ2_SRC="subprojects/bzip2/bzlib.c subprojects/bzip2/decompress.c subprojects/bz
 MD5_CFLAGS="-Isubprojects/md5"
 MD5_SRC="subprojects/md5/md5.c"
 
+MINIZ_CFLAGS="-Isubprojects/miniz"
+MINIZ_SRC="subprojects/miniz/*.c"
+
+JSMN_CFLAGS="-Isubprojects/jsmn"
+JSMN_SRC="" # header-only
+
+LIB_CFLAGS="$XZ_CFLAGS $YAML_CFLAGS $BZ2_CFLAGS $MD5_CFLAGS $MINIZ_CFLAGS $JSMN_CFLAGS"
+LIB_SRC="$XZ_SRC $YAML_SRC $BZ2_SRC $MD5_SRC $MINIZ_SRC $JSMN_SRC"
+
 # store working directory
 OLD_PWD=`pwd`
 
@@ -43,7 +52,7 @@ rm -rf --one-filesystem build/util
 #CFLAGS="-g"
 CFLAGS="-Os -flto=4 -ffunction-sections -fdata-sections -Wl,--gc-sections -s"
 mkdir -p "$NATIVE_DST"
-gcc -o "$NATIVE_DST/apbpatch" src/main.c $CFLAGS $XZ_CFLAGS $XZ_SRC $YAML_CFLAGS $YAML_SRC $BZ2_CFLAGS $BZ2_SRC $MD5_CFLAGS $MD5_SRC
+gcc -o "$NATIVE_DST/apbpatch" src/main.c $CFLAGS $LIB_CFLAGS $LIB_SRC
 cp README.md LICENSE "$NATIVE_DST/"
 cd "$NATIVE_DST"
 rm -f "../$NATIVE_TAR"
@@ -54,7 +63,7 @@ cd "$OLD_PWD"
 CFLAGS="-Oz"
 EMFLAGS="-s ENVIRONMENT=web -s WASM=1 -s EXPORTED_FUNCTIONS=_info,_patch --shell-file ui/shell.html -s EXPORTED_RUNTIME_METHODS=cwrap -s ALLOW_MEMORY_GROWTH=1"
 mkdir -p "$WASM_DST"
-emcc -o "$WASM_DST/apbpatch.html" src/main.c $CFLAGS $EMFLAGS $XZ_CFLAGS $XZ_SRC $YAML_CFLAGS $YAML_SRC $BZ2_CFLAGS $BZ2_SRC $MD5_CFLAGS $MD5_SRC
+emcc -o "$WASM_DST/apbpatch.html" src/main.c $CFLAGS $EMFLAGS $LIB_CFLAGS $LIB_SRC
 # pre-compress
 brotli -k -f -q 11 "$WASM_DST/apbpatch.wasm" "$WASM_DST/apbpatch.js"
 gzip -k -f -9 "$WASM_DST/apbpatch.wasm" "$WASM_DST/apbpatch.js"

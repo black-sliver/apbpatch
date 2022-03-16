@@ -6,6 +6,8 @@
  * see README.md and LICENSE for more information
  */
 
+#define JSMN_STATIC
+#define JSMN_PARENT_LINKS
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -16,6 +18,8 @@
 #include <yaml.h>
 #include <bzlib.h>
 #include <md5.h>
+#include <miniz.h>
+#include <jsmn.h>
 #include "b64.h"
 
 #ifdef __EMSCRIPTEN__
@@ -148,9 +152,32 @@ xz_decompress(lzma_stream *strm, const char *inname, FILE *infile, uint8_t **out
 	}
 }
 
-static bool read_patch(const char *patchfile, uint8_t **ppatch_data, size_t *ppatch_data_len, char **pgame, char **pchecksum)
+static bool json_is(const char *json, jsmntok_t *tok, const char *s) {
+    if (tok->type == JSMN_STRING && (int)strlen(s) == tok->end - tok->start &&
+            strncmp(json + tok->start, s, tok->end - tok->start) == 0) {
+        return true;
+    }
+    return false;
+}
+
+static char* json_strdup(const char *json, jsmntok_t *tok) {
+    if (tok->type != JSMN_STRING) {
+        return NULL;
+    }
+    return strndup(json + tok->start, tok->end - tok->start);
+}
+
+static long json_long(const char *json, jsmntok_t *tok, bool* ok) {
+    if (tok->type != JSMN_PRIMITIVE || json[tok->start] == 't' || json[tok->start] == 'f' || json[tok->start] == 'n') {
+        if (ok) *ok = false;
+        return 0;
+    }
+    if (ok) *ok = true;
+    return strtol(json + tok->start, NULL, 10);
+}
+
+static bool read_patch_v3(FILE *fpatch, uint8_t **ppatch_data, size_t *ppatch_data_len, char **pgame, char **pchecksum)
 {
-    FILE *fpatch = NULL;
     lzma_stream lzma = LZMA_STREAM_INIT;
     int res = 0;
     char *yaml = NULL;
@@ -169,12 +196,6 @@ static bool read_patch(const char *patchfile, uint8_t **ppatch_data, size_t *ppa
     if (ppatch_data) *ppatch_data = NULL;
     if (ppatch_data_len) *ppatch_data_len = 0;
 
-    fpatch = fopen(patchfile, "rb");
-    if (!fpatch) {
-        fprintf(stderr, "Could not open patchfile!\n");
-        goto fopen_error;
-    }
-
     /* read and decompress apbp */
     yaml = NULL;
     yaml_size = 0;
@@ -184,8 +205,6 @@ static bool read_patch(const char *patchfile, uint8_t **ppatch_data, size_t *ppa
     yaml = (char*)realloc(yaml, yaml_size+1);
     if (!yaml) goto yaml_malloc_error;
     yaml[yaml_size] = 0; // nul terminate
-    fclose(fpatch);
-    fpatch = NULL;
 
     /* parse yaml. NOTE: we don't care about most of it, so this may look dirty */
     if(!yaml_parser_initialize(&parser)) {
@@ -275,9 +294,136 @@ lzma_decompress_error:
     free(yaml);
 lzma_init_error:
 yaml_malloc_error:
-    fclose(fpatch);
 fopen_error:
     return false;
+}
+
+static bool read_patch_v4(FILE *fpatch, uint8_t **ppatch_data, size_t *ppatch_data_len, char **pgame, char **pchecksum)
+{
+    int i, r;
+    mz_bool status;
+    mz_zip_archive zip_archive;
+    char *json = NULL;
+    size_t json_size = 0;
+    jsmn_parser j;
+    jsmntok_t t[128]; // arbitrary json token limit
+    int t_count = sizeof(t) / sizeof(t[0]);
+
+    if (pchecksum) *pchecksum = NULL;
+    if (pgame) *pgame = NULL;
+    if (ppatch_data) *ppatch_data = NULL;
+    if (ppatch_data_len) *ppatch_data_len = 0;
+
+    mz_zip_zero_struct(&zip_archive);
+    status = mz_zip_reader_init_cfile(&zip_archive, fpatch, 0, 0);
+    if (!status) {
+        fprintf(stderr, "Error reading zip: %s!\n", mz_zip_get_error_string(mz_zip_peek_last_error(&zip_archive)));
+        return false;
+    }
+
+    json = (char*)mz_zip_reader_extract_file_to_heap(&zip_archive, "archipelago.json", &json_size, 0);
+    if (!json) {
+        fprintf(stderr, "Could not read archipelago.json from zip: %s!\n",
+                mz_zip_get_error_string(mz_zip_peek_last_error(&zip_archive)));
+        goto data_error;
+    }
+
+    jsmn_init(&j);
+    r = jsmn_parse(&j, json, json_size, t, t_count);
+    if (r == JSMN_ERROR_NOMEM) {
+        fprintf(stderr, "archipelago.json longer than expected!\n");
+        goto data_error;
+    } else if (r<0 || t[0].type != JSMN_OBJECT) {
+        fprintf(stderr, "Could not parse archipelago.json (%d)!\n", r);
+        goto data_error;
+    }
+    for (i = 1; i < r; i++) {
+        /* iterate over root object */
+        if (json_is(json, &t[i], "game") && pgame) {
+            *pgame = json_strdup(json, &t[i+1]);
+            if (!*pgame) {
+                fprintf(stderr, "\"game\" not a string!\n");
+                goto data_error;
+            }
+            i++;
+        } else if (json_is(json, &t[i], "base_checksum") && pchecksum) {
+            *pchecksum = json_strdup(json, &t[i+1]);
+            if (!*pchecksum) {
+                fprintf(stderr, "\"base_checksum\" not a string!\n");
+                goto data_error;
+            }
+            i++;
+        } else if (json_is(json, &t[i], "compatible_version")) {
+            long compatible_version = json_long(json, &t[i+1], NULL);
+            if (compatible_version != 4) {
+                fprintf(stderr, "Incompatible apbp version %ld\n", compatible_version);
+                goto data_error;
+            }
+            i++;
+        } else if (t[i].type == JSMN_ARRAY) {
+            /* ignore unknown array */
+            while (i < t_count-1 && t[i+1].parent != -1) i++;
+        } else if (t[i].type == JSMN_OBJECT) {
+            /* ignore unknown object */
+            while (i < t_count-1 && t[i+1].parent != -1) i++;
+        } else {
+            /* ignore unknown literal */
+            i++;
+        }
+    }
+
+    if (ppatch_data && ppatch_data_len) {
+        *ppatch_data = (uint8_t*)mz_zip_reader_extract_file_to_heap(&zip_archive, "delta.bsdiff4", ppatch_data_len, 0);
+        if (!*ppatch_data) {
+            fprintf(stderr, "Could not read delta.bsdiff4 from zip: %s!\n",
+                    mz_zip_get_error_string(mz_zip_peek_last_error(&zip_archive)));
+            goto data_error;
+        }
+    }
+
+    free(json);
+    mz_zip_reader_end(&zip_archive);
+    return true;
+
+data_error:
+    free(json);
+    mz_zip_reader_end(&zip_archive);
+    return false;
+}
+
+static bool read_patch(const char *patchfile, uint8_t **ppatch_data, size_t *ppatch_data_len, char **pgame, char **pchecksum)
+{
+    bool res = false;
+    /* open patch file and read header/magic sequence */
+    FILE *fpatch = fopen(patchfile, "rb");
+    uint8_t magic[6];
+    if (!fpatch) {
+        fprintf(stderr, "Could not open patchfile!\n");
+        goto fopen_error;
+    }
+    if (fread(magic, 1, sizeof(magic), fpatch) != sizeof(magic)) {
+        fprintf(stderr, "Could not read patchfile!\n");
+        goto fread_error;
+    }
+    rewind(fpatch);
+
+    /* if the patch file is a zip file, it's v4 or newer */
+    if (memcmp(magic, "PK", 2) == 0) {
+        res = read_patch_v4(fpatch, ppatch_data, ppatch_data_len, pgame, pchecksum);
+    }
+    /* if the patch file is a xz stream, it's v3 or older */
+    else if (memcmp(magic, "\xFD\x37\x7A\x58\x5A\x00", 6) == 0) {
+        res = read_patch_v3(fpatch, ppatch_data, ppatch_data_len, pgame, pchecksum);
+    }
+    /* otherwise the format is unknown/incompatible */
+    else {
+        fprintf(stderr, "Not a patch file or unknown version!\n");
+    }
+
+fread_error:
+    fclose(fpatch);
+fopen_error:
+    return res;
 }
 
 static off_t offtin(uint8_t *buf)

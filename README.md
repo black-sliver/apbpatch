@@ -37,5 +37,14 @@ Copyright 1990 RSA Data Security, Inc\
 md5.h had to be changed and thus is\
 derived from the RSA Data Security, Inc. MD5 Message Digest Algorithm
 
+**uses miniz**\
+Copyright 2013-2014 RAD Game Tools and Valve Software\
+Copyright 2010-2014 Rich Geldreich and Tenacious Software LLC\
+https://github.com/richgel999/miniz
+
+**uses jsmn**\
+Copyright 2010 Serge A. Zaitsev\
+https://github.com/zserge/jsmn
+
 *find the entire source code on https://github.com/black-sliver/apbpatch*
 

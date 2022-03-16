@@ -30,6 +30,7 @@
 
 
 #define APPNAME "apbpatch"
+#define VERSION "0.2.0"
 
 
 static bool
@@ -708,7 +709,8 @@ void print_usage(const char* app)
 {
     printf("Usage: %s <oldfile> <newfile> <patchfile>\n", app);
     printf("       %s <oldfile> <patchfile>\n\n", app);
-    printf("       %s --info <patchfile>\n\n", app);
+    printf("       %s --info <patchfile>\n", app);
+    printf("       %s --version\n\n", app);
 }
 
 int main(int argc, char** argv)
@@ -717,6 +719,11 @@ int main(int argc, char** argv)
     const char *oldfile, *patchfile;
     const char *slash, *bslash;
     char *newfile;
+
+    if (argc>1 && strcmp(argv[1], "--version")==0) {
+        printf("%s\n", VERSION);
+        return 0;
+    }
 
     if (argc<3 || argc>4) {
         const char *app = argv[0] ? argv[0] : APPNAME;
@@ -727,7 +734,7 @@ int main(int argc, char** argv)
         print_usage(app);
         return 1;
     }
-    
+
     if (argc==3 && strcmp(argv[1], "--info")==0) {
         patchfile = argv[2];
         return info(patchfile) ? 0 : 1;

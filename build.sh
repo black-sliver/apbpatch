@@ -6,7 +6,7 @@
 # varying build systems to create a single wasm blob is worse than this.
 #
 
-VERSION="0.1.0"
+VERSION="0.2.0"
 
 FVERSION="${VERSION//./-}"
 NATIVE_PLATFORM="`uname -s`-`uname -m`"

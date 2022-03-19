@@ -30,7 +30,7 @@
 
 
 #define APPNAME "apbpatch"
-#define VERSION "0.2.1"
+#define VERSION "0.2.2"
 
 
 static bool

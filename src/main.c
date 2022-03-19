@@ -361,7 +361,7 @@ static bool read_patch_v4(FILE *fpatch, uint8_t **ppatch_data, size_t *ppatch_da
             }
         }
         /* skip to the next key in root */
-        while (i < t_count-1 && t[i+1].parent != 0) i++;
+        while (i < r - 1 && t[i+1].parent != 0) i++;
     }
 
     if (ppatch_data && ppatch_data_len) {

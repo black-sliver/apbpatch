@@ -177,7 +177,8 @@ static long json_long(const char *json, jsmntok_t *tok, bool* ok) {
     return strtol(json + tok->start, NULL, 10);
 }
 
-static bool read_patch_v3(FILE *fpatch, uint8_t **ppatch_data, size_t *ppatch_data_len, char **pgame, char **pchecksum)
+static bool read_patch_v3(FILE *fpatch, uint8_t **ppatch_data, size_t *ppatch_data_len,
+                          char **pgame, char **pchecksum, char **pfileext)
 {
     lzma_stream lzma = LZMA_STREAM_INIT;
     int res = 0;
@@ -192,6 +193,7 @@ static bool read_patch_v3(FILE *fpatch, uint8_t **ppatch_data, size_t *ppatch_da
     uint8_t *patch_data = NULL;
     size_t patch_data_len = 0;
 
+    if (pfileext) *pfileext = NULL;
     if (pchecksum) *pchecksum = NULL;
     if (pgame) *pgame = NULL;
     if (ppatch_data) *ppatch_data = NULL;
@@ -276,6 +278,7 @@ static bool read_patch_v3(FILE *fpatch, uint8_t **ppatch_data, size_t *ppatch_da
         return false;
     }
 
+    if (pfileext) *pfileext = strdup(".sfc"); /* v3 is snes-only */
     if (ppatch_data) *ppatch_data = patch_data;
     else free(patch_data);
     if (ppatch_data_len) *ppatch_data_len = patch_data_len;
@@ -299,7 +302,8 @@ fopen_error:
     return false;
 }
 
-static bool read_patch_v4(FILE *fpatch, uint8_t **ppatch_data, size_t *ppatch_data_len, char **pgame, char **pchecksum)
+static bool read_patch_v4(FILE *fpatch, uint8_t **ppatch_data, size_t *ppatch_data_len,
+                          char **pgame, char **pchecksum, char **pfileext)
 {
     int i, r;
     mz_bool status;
@@ -310,6 +314,7 @@ static bool read_patch_v4(FILE *fpatch, uint8_t **ppatch_data, size_t *ppatch_da
     jsmntok_t t[128]; // arbitrary json token limit
     int t_count = sizeof(t) / sizeof(t[0]);
 
+    if (pfileext) *pfileext = NULL;
     if (pchecksum) *pchecksum = NULL;
     if (pgame) *pgame = NULL;
     if (ppatch_data) *ppatch_data = NULL;
@@ -359,6 +364,12 @@ static bool read_patch_v4(FILE *fpatch, uint8_t **ppatch_data, size_t *ppatch_da
                 fprintf(stderr, "Incompatible apbp version %ld\n", compatible_version);
                 goto data_error;
             }
+        } else if (json_is(json, &t[i], "result_file_ending") && pfileext) {
+            *pfileext = json_strdup(json, &t[i+1]);
+            if (!*pfileext) {
+                fprintf(stderr, "\"result_file_ending\" not a string!\n");
+                goto data_error;
+            }
         }
         /* skip to the next key in root */
         while (i < r - 1 && t[i+1].parent != 0) i++;
@@ -380,10 +391,14 @@ static bool read_patch_v4(FILE *fpatch, uint8_t **ppatch_data, size_t *ppatch_da
 data_error:
     free(json);
     mz_zip_reader_end(&zip_archive);
+    if (pgame) free(*pgame);
+    if (pchecksum) free(*pchecksum);
+    if (pfileext) free(*pfileext);
     return false;
 }
 
-static bool read_patch(const char *patchfile, uint8_t **ppatch_data, size_t *ppatch_data_len, char **pgame, char **pchecksum)
+static bool read_patch(const char *patchfile, uint8_t **ppatch_data, size_t *ppatch_data_len,
+                       char **pgame, char **pchecksum, char **pfileext)
 {
     bool res = false;
     /* open patch file and read header/magic sequence */
@@ -401,11 +416,11 @@ static bool read_patch(const char *patchfile, uint8_t **ppatch_data, size_t *ppa
 
     /* if the patch file is a zip file, it's v4 or newer */
     if (memcmp(magic, "PK", 2) == 0) {
-        res = read_patch_v4(fpatch, ppatch_data, ppatch_data_len, pgame, pchecksum);
+        res = read_patch_v4(fpatch, ppatch_data, ppatch_data_len, pgame, pchecksum, pfileext);
     }
     /* if the patch file is a xz stream, it's v3 or older */
     else if (memcmp(magic, "\xFD\x37\x7A\x58\x5A\x00", 6) == 0) {
-        res = read_patch_v3(fpatch, ppatch_data, ppatch_data_len, pgame, pchecksum);
+        res = read_patch_v3(fpatch, ppatch_data, ppatch_data_len, pgame, pchecksum, pfileext);
     }
     /* otherwise the format is unknown/incompatible */
     else {
@@ -473,7 +488,7 @@ bool patch(const char* oldfile, const char* newfile, const char* patchfile)
     }
 
     /* read bsdiff from apbp */
-    if (!read_patch(patchfile, &patch_data, &patch_data_len, &game, &checksum)) {
+    if (!read_patch(patchfile, &patch_data, &patch_data_len, &game, &checksum, NULL)) {
         goto read_err;
     }
     /* check bsdiff header */
@@ -687,9 +702,12 @@ EMSCRIPTEN_KEEPALIVE
 bool info(const char *patchfile)
 {
     char *game = NULL;
-    if (read_patch(patchfile, NULL, NULL, &game, NULL)) {
+    char *fileext = NULL;
+    if (read_patch(patchfile, NULL, NULL, &game, NULL, &fileext)) {
         printf("game: %s\n", game ? game : "Unknown");
+        printf("file ext: %s\n", fileext ? fileext : "*");
         free(game);
+        free(fileext);
         return true;
     }
     return false;

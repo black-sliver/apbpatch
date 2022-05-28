@@ -200,7 +200,7 @@ var loadPatch = function(f) {
     patchname = f.name;
     FS.writeFile(patchname, new Uint8Array(buf));
     if (info(patchname)) {
-      patchdrop.innerText = 'APBP ' + stdout.value.split('\n').slice(-2,1).pop();
+      patchdrop.innerText = 'APBP ' + stdout.value.split('\n').slice(-3,-2).pop();
       romdrop.style.display = 'block';
     } else {
       patchdrop.innerText = 'Drop you patch here';

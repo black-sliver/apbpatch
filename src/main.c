@@ -30,7 +30,7 @@
 
 
 #define APPNAME "apbpatch"
-#define VERSION "0.3.0"
+#define VERSION "0.3.5"
 
 
 static bool
@@ -360,7 +360,8 @@ static bool read_patch_v4(FILE *fpatch, uint8_t **ppatch_data, size_t *ppatch_da
             }
         } else if (json_is(json, &t[i], "compatible_version")) {
             long compatible_version = json_long(json, &t[i+1], NULL);
-            if (compatible_version != 4) {
+            /* version 4 and 5 are fully compatible from our PoV */
+            if (compatible_version < 4 || compatible_version > 5) {
                 fprintf(stderr, "Incompatible apbp version %ld\n", compatible_version);
                 goto data_error;
             }

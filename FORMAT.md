@@ -16,7 +16,7 @@ version: 3
 Difference between versions 1-3 is specific to the python patcher.
 
 
-## v4
+## v4 and newer
 
 ZIP file containing game specific files and an `archipelago.json` with at least
 
@@ -30,11 +30,22 @@ ZIP file containing game specific files and an `archipelago.json` with at least
 
 The JSON file should be deflate compressed.
 
+
+### v5
+
+JSON contains `"patch_file_ending": ".extension"` that corresponds to the
+original patch output filename. Useful if a single game can generate two
+different patches.
+
+
 ### ROM-based games
 
-JSON also contains `"base_checksum": "[hex string of md5 of vanilla file]"`.\
-ZIP file also contains a `delta.bsdiff4` file that is the diff between
-original and randomized ROM.
+JSON also contains
+* `"base_checksum": "[hex string of md5 of vanilla file]"`
+* `"result_file_ending": ".extension"`
+
+ZIP file also contains
+* `delta.bsdiff4` file that is the diff between original and randomized ROM
 
 The bsdiff should ideally be stored (not compressed).
 
